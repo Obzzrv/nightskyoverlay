@@ -3,23 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Filter Component</title>
+    <title>Modern Filter Component</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Voegt een modern lettertype toe dat past bij de stijl */
+        /* Een modern, strak lettertype van Google Fonts */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
         
         body {
             font-family: 'Inter', sans-serif;
         }
 
-        /* Aangepaste stijlen voor de slider (input[type=range]) */
+        /* Aangepaste stijlen voor de moderne slider (input[type=range]) */
         input[type="range"] {
             -webkit-appearance: none;
             appearance: none;
             width: 100%;
-            height: 4px;
-            background: #374151; /* Grijze track */
+            height: 5px; /* Iets dikker voor een betere grip */
+            background: #333; /* Donkergrijze track */
             border-radius: 5px;
             outline: none;
         }
@@ -27,16 +27,23 @@
         input[type="range"]::-webkit-slider-thumb {
             -webkit-appearance: none;
             appearance: none;
-            width: 18px;
-            height: 18px;
+            width: 20px;
+            height: 20px;
             background: #FFFFFF; /* Witte cirkel */
             border-radius: 50%;
             cursor: pointer;
+            transition: box-shadow 0.2s ease-in-out;
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
+        }
+        
+        /* Effect bij hover of focus op de slider-knop */
+        input[type="range"]:hover::-webkit-slider-thumb {
+            box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.1);
         }
 
         input[type="range"]::-moz-range-thumb {
-            width: 18px;
-            height: 18px;
+            width: 20px;
+            height: 20px;
             background: #FFFFFF;
             border-radius: 50%;
             cursor: pointer;
@@ -44,38 +51,37 @@
 
         /* Aangepaste stijlen voor de dropdown-pijltjes */
         .custom-select {
-            /* SVG-icoon voor de op/neer-pijltjes */
-            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='2' stroke='%239ca3af'%3e%3cpath stroke-linecap='round' stroke-linejoin='round' d='M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9' /%3e%3c/svg%3e");
+            /* SVG-icoon voor de op/neer-pijltjes, in een lichte kleur */
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='2' stroke='%23A0A0A0'%3e%3cpath stroke-linecap='round' stroke-linejoin='round' d='M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9' /%3e%3c/svg%3e");
             background-position: right 0.7rem center;
             background-repeat: no-repeat;
             background-size: 1.25em 1.25em;
             -webkit-appearance: none;
             -moz-appearance: none;
             appearance: none;
-            padding-right: 2.5rem; /* Ruimte voor het pijltje */
         }
     </style>
 </head>
-<body class="bg-gray-900 flex items-center justify-center min-h-screen p-4">
+<body class="bg-black flex items-center justify-center min-h-screen p-4">
 
-<div class="bg-gray-800 p-8 rounded-xl shadow-2xl max-w-2xl w-full">
+<div class="bg-[#1C1C1C] border border-gray-800 p-8 rounded-xl shadow-2xl max-w-2xl w-full">
 
-    <h2 class="text-xl font-bold text-white mb-4">Kaart</h2>
-    <div class="mb-8">
+    <h2 class="text-2xl font-bold text-white mb-5 tracking-tight">Kaart</h2>
+    <div class="mb-10">
         <div class="flex justify-between items-center mb-2">
-            <label for="light-intensity" class="text-sm text-gray-300">Intensiteit van lichtvervuiling</label>
-            <span id="intensity-value" class="text-sm font-medium text-white">44</span>
+            <label for="light-intensity" class="text-sm text-gray-400">Intensiteit van lichtvervuiling</label>
+            <span id="intensity-value" class="text-sm font-semibold text-white">44</span>
         </div>
         <input id="light-intensity" type="range" min="0" max="100" value="44" oninput="document.getElementById('intensity-value').textContent = this.value;">
     </div>
 
-    <h2 class="text-xl font-bold text-white mb-4">Standaardfilters</h2>
+    <h2 class="text-2xl font-bold text-white mb-5 tracking-tight">Standaardfilters</h2>
     
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
         
         <div>
             <label for="accommodation-type" class="block mb-2 text-sm font-medium text-gray-400">Type accommodatie</label>
-            <select id="accommodation-type" class="custom-select bg-gray-700 border-gray-600 text-gray-200 text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+            <select id="accommodation-type" class="custom-select bg-[#2b2b2b] border border-gray-700 text-gray-200 text-sm rounded-lg focus:ring-2 focus:ring-white/50 focus:border-white block w-full p-3 transition duration-200">
                 <option selected>Alles</option>
                 <option>Huis</option>
                 <option>Appartement</option>
@@ -85,7 +91,7 @@
 
         <div>
             <label for="price" class="block mb-2 text-sm font-medium text-gray-400">Prijs</label>
-            <select id="price" class="custom-select bg-gray-700 border-gray-600 text-gray-200 text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+            <select id="price" class="custom-select bg-[#2b2b2b] border border-gray-700 text-gray-200 text-sm rounded-lg focus:ring-2 focus:ring-white/50 focus:border-white block w-full p-3 transition duration-200">
                 <option selected>Geen voorkeur</option>
                 <option>&lt; €100</option>
                 <option>€100 - €200</option>
@@ -95,7 +101,7 @@
 
         <div>
             <label for="bedrooms" class="block mb-2 text-sm font-medium text-gray-400">Aantal slaapkamers</label>
-            <select id="bedrooms" class="custom-select bg-gray-700 border-gray-600 text-gray-200 text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+            <select id="bedrooms" class="custom-select bg-[#2b2b2b] border border-gray-700 text-gray-200 text-sm rounded-lg focus:ring-2 focus:ring-white/50 focus:border-white block w-full p-3 transition duration-200">
                 <option selected>Alle</option>
                 <option>1</option>
                 <option>2</option>
@@ -105,7 +111,7 @@
 
         <div>
             <label for="bathrooms" class="block mb-2 text-sm font-medium text-gray-400">Aantal badkamers</label>
-            <select id="bathrooms" class="custom-select bg-gray-700 border-gray-600 text-gray-200 text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+            <select id="bathrooms" class="custom-select bg-[#2b2b2b] border border-gray-700 text-gray-200 text-sm rounded-lg focus:ring-2 focus:ring-white/50 focus:border-white block w-full p-3 transition duration-200">
                 <option selected>Alle</option>
                 <option>1</option>
                 <option>2</option>
