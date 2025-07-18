@@ -329,12 +329,27 @@
         #sync-capture.active {
             pointer-events: auto;
             cursor: grab;
-            /* Lower z-index in both mode to allow scroll events on underlying elements */
             z-index: 5;
         }
         
         #sync-capture.active:active {
             cursor: grabbing;
+        }
+        
+        /* Iframe error handling */
+        #iframe-error {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-family: 'Inter', sans-serif;
+            z-index: 5;
         }
         
         /* Animations */
@@ -464,6 +479,9 @@
                     <button id="fullscreen-button" class="mode-button bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors" title="Volledig scherm (F)">
                         ⛶
                     </button>
+                    <button id="open-new-tab" class="mode-button bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors" title="Open in nieuwe tab (O)">
+                        ↗️
+                    </button>
                 </div>
                 
                 <button id="control-mode-toggle" class="mode-button bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors" title="Wissel tussen website, overlay en beide bediening (Tab)">
@@ -493,6 +511,27 @@
                 sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads allow-modals allow-orientation-lock allow-pointer-lock allow-presentation allow-top-navigation-by-user-activation"
                 allow="geolocation; microphone; camera; midi; vr; accelerometer; gyroscope; payment; ambient-light-sensor; encrypted-media; usb">
         </iframe>
+        
+        <div id="iframe-error" class="hidden">
+            <div class="text-center max-w-md mx-auto p-8">
+                <div class="text-6xl mb-4">🚫</div>
+                <h2 class="text-2xl font-bold mb-4">Website kan niet worden weergegeven</h2>
+                <p class="text-lg mb-6 opacity-90">
+                    Deze website blokkeert iframe embedding om beveiligingsredenen.
+                </p>
+                <div class="space-y-3">
+                    <button id="retry-iframe" class="w-full bg-white/20 hover:bg-white/30 text-white py-3 px-6 rounded-lg font-medium transition-colors backdrop-blur-sm">
+                        🔄 Opnieuw proberen
+                    </button>
+                    <button id="open-external" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-6 rounded-lg font-medium transition-colors">
+                        ↗️ Open in nieuwe tab
+                    </button>
+                </div>
+                <p class="text-sm mt-4 opacity-75">
+                    Je kunt nog steeds de overlay gebruiken om locaties te vergelijken
+                </p>
+            </div>
+        </div>
         
         <div id="overlay" class="absolute top-0 left-0 w-full h-full z-10">
             <div id="map"></div>
@@ -532,13 +571,15 @@
             <div><kbd class="bg-gray-700 px-2 py-1 rounded">S</kbd> - Synchroniseer kaarten</div>
             <div><kbd class="bg-gray-700 px-2 py-1 rounded">V</kbd> - Toon/verberg overlay</div>
             <div><kbd class="bg-gray-700 px-2 py-1 rounded">F</kbd> - Volledig scherm</div>
+            <div><kbd class="bg-gray-700 px-2 py-1 rounded">O</kbd> - Open in nieuwe tab</div>
             <div><kbd class="bg-gray-700 px-2 py-1 rounded">↑/↓</kbd> - Transparantie aanpassen</div>
             <div><kbd class="bg-gray-700 px-2 py-1 rounded">C</kbd> - Toon coördinaten</div>
             <div><kbd class="bg-gray-700 px-2 py-1 rounded">H</kbd> - Deze help</div>
             <div><kbd class="bg-gray-700 px-2 py-1 rounded">Esc</kbd> - Sluit overlay/help</div>
             <div class="mt-3 pt-3 border-t border-gray-600">
                 <strong>Beide Modus:</strong> Sleep overal om beide kaarten synchroon te bewegen<br>
-                <strong>Scroll Sync:</strong> Muiswiel werkt op zowel website als overlay
+                <strong>Scroll Sync:</strong> Muiswiel werkt op zowel website als overlay<br>
+                <strong>Iframe Blokkade:</strong> Sommige websites blokkeren iframe embedding - gebruik 'Open in nieuwe tab'
             </div>
         </div>
         <button id="close-help" class="mt-4 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm transition-colors">Sluiten</button>
@@ -568,13 +609,17 @@
             coordsText: document.getElementById('coords-text'),
             syncCapture: document.getElementById('sync-capture'),
             syncStatus: document.getElementById('sync-status'),
-            mainContent: document.getElementById('main-content')
+            mainContent: document.getElementById('main-content'),
+            iframeError: document.getElementById('iframe-error'),
+            retryIframe: document.getElementById('retry-iframe'),
+            openExternal: document.getElementById('open-external'),
+            openNewTab: document.getElementById('open-new-tab')
         };
 
         // Global state
         let map;
         let lightPollutionLayer;
-        let controlMode = 'website'; // 'website', 'overlay', 'both'
+        let controlMode = 'website'; // Start with website mode as default
         let autoSyncEnabled = false;
         let autoSyncInterval = null;
         let lastKnownPosition = null;
@@ -585,6 +630,8 @@
         let lastMousePos = null;
         let initialMapCenter = null;
         let syncLocked = false;
+        let iframeLoadTimeout = null;
+        let currentUrl = '';
 
         // Initialize map with retry mechanism
         function initializeMap() {
@@ -674,9 +721,52 @@
                 url = 'https://' + url;
             }
             
+            currentUrl = url;
+            elements.urlInput.value = url;
+            
+            // Hide iframe error and show iframe
+            elements.iframeError.classList.add('hidden');
+            elements.contentFrame.style.display = 'block';
+            
+            // Set up iframe load timeout
+            clearTimeout(iframeLoadTimeout);
+            iframeLoadTimeout = setTimeout(() => {
+                // Check if iframe failed to load
+                try {
+                    if (elements.contentFrame.contentDocument === null) {
+                        showIframeError();
+                    }
+                } catch (e) {
+                    // Cross-origin frame, assume it loaded successfully
+                }
+            }, 8000);
+            
             elements.contentFrame.src = url;
             console.log('Navigating to:', url);
             startAutoSync();
+        }
+
+        function showIframeError() {
+            elements.iframeError.classList.remove('hidden');
+            elements.contentFrame.style.display = 'none';
+            clearTimeout(iframeLoadTimeout);
+        }
+
+        function hideIframeError() {
+            elements.iframeError.classList.add('hidden');
+            elements.contentFrame.style.display = 'block';
+        }
+
+        function retryIframe() {
+            hideIframeError();
+            navigate();
+        }
+
+        function openInNewTab() {
+            if (currentUrl || elements.urlInput.value) {
+                const url = currentUrl || elements.urlInput.value;
+                window.open(url, '_blank', 'noopener,noreferrer');
+            }
         }
 
         // Overlay visibility
@@ -1030,7 +1120,7 @@
                 if (newUrl && newUrl !== currentUrl) {
                     elements.urlInput.value = newUrl;
                     try {
-                        if (elements.contentFrame && elements.contentFrame.contentWindow) {
+                        if (elements.contentFrame && elements.contentFrame.contentWindow && !elements.iframeError.classList.contains('hidden') === false) {
                             elements.contentFrame.src = newUrl;
                         }
                     } catch (crossOriginError) {
@@ -1073,10 +1163,11 @@
             autoSyncInterval = setInterval(() => {
                 if ((controlMode === 'website' || controlMode === 'both') && autoSyncEnabled && !syncLocked) {
                     try {
-                        if (elements.contentFrame && elements.contentFrame.contentWindow) {
+                        if (elements.contentFrame && elements.contentFrame.contentWindow && elements.iframeError.classList.contains('hidden')) {
                             const iframeUrl = elements.contentFrame.contentWindow.location.href;
                             if (iframeUrl && iframeUrl !== elements.urlInput.value && iframeUrl !== 'about:blank') {
                                 elements.urlInput.value = iframeUrl;
+                                currentUrl = iframeUrl;
                                 const coords = getCoordsFromUrl();
                                 if (coords && map) {
                                     if (!lastKnownPosition || 
@@ -1215,6 +1306,10 @@
                     e.preventDefault();
                     toggleFullscreen();
                     break;
+                case 'o':
+                    e.preventDefault();
+                    openInNewTab();
+                    break;
                 case 'c':
                     e.preventDefault();
                     toggleCoordinates();
@@ -1238,89 +1333,3 @@
                     break;
                 case 'arrowdown':
                     e.preventDefault();
-                    elements.opacitySlider.value = Math.max(0, parseFloat(elements.opacitySlider.value) - 0.05);
-                    updateOpacity();
-                    break;
-            }
-        });
-
-        // Event listeners
-        elements.goButton.addEventListener('click', navigate);
-        elements.urlInput.addEventListener('keypress', (e) => { 
-            if (e.key === 'Enter') navigate(); 
-        });
-        elements.overlayToggle.addEventListener('change', updateOverlayVisibility);
-        elements.opacitySlider.addEventListener('input', updateOpacity);
-        elements.syncButton.addEventListener('click', syncMaps);
-        elements.controlModeToggle.addEventListener('click', toggleControlMode);
-        elements.fullscreenButton.addEventListener('click', toggleFullscreen);
-        elements.helpButton.addEventListener('click', showHelp);
-        elements.closeHelp.addEventListener('click', hideHelp);
-        
-        // Fullscreen event listeners
-        document.addEventListener('fullscreenchange', () => {
-            if (!document.fullscreenElement) {
-                isFullscreen = false;
-                elements.fullscreenButton.textContent = '⛶';
-            }
-        });
-
-        document.addEventListener('webkitfullscreenchange', () => {
-            if (!document.webkitFullscreenElement) {
-                isFullscreen = false;
-                elements.fullscreenButton.textContent = '⛶';
-            }
-        });
-
-        document.addEventListener('msfullscreenchange', () => {
-            if (!document.msFullscreenElement) {
-                isFullscreen = false;
-                elements.fullscreenButton.textContent = '⛶';
-            }
-        });
-
-        // Iframe event listeners
-        elements.contentFrame.addEventListener('load', () => {
-            console.log('Website loaded');
-            setTimeout(() => {
-                try {
-                    if (elements.contentFrame && elements.contentFrame.contentWindow) {
-                        const iframeUrl = elements.contentFrame.contentWindow.location.href;
-                        if (iframeUrl && iframeUrl !== 'about:blank' && iframeUrl !== elements.urlInput.value) {
-                            elements.urlInput.value = iframeUrl;
-                        }
-                    }
-                } catch (e) {
-                    // Cross-origin iframe - expected behavior
-                }
-            }, 500);
-        });
-
-        // Global error handlers
-        window.addEventListener('error', (e) => {
-            console.error('Global error:', e.message, 'at', e.filename, ':', e.lineno);
-        });
-
-        window.addEventListener('unhandledrejection', (e) => {
-            console.error('Unhandled promise rejection:', e.reason);
-        });
-
-        // Cleanup on page unload
-        window.addEventListener('beforeunload', () => {
-            stopAutoSync();
-            disableSyncMode();
-        });
-
-        // Initialize application
-        window.addEventListener('load', () => {
-            console.log('Initializing Web Overlay Tool...');
-            initializeMap();
-            updateOverlayVisibility();
-            updateOpacity();
-            updateControlMode();
-            console.log('Web Overlay Tool ready!');
-        });
-
-    </script>
-</body>
-</html>
