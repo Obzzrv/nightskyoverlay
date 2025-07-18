@@ -1,1 +1,1326 @@
-# nightskyoverlay.github.io
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Overlay Tool - Light Pollution 2024</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <script>
+        if (typeof L === 'undefined') {
+            console.warn('Primary Leaflet CDN failed, loading fallback...');
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+            script.crossOrigin = 'anonymous';
+            document.head.appendChild(script);
+            
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
+            link.crossOrigin = 'anonymous';
+            document.head.appendChild(link);
+        }
+    </script>
+    
+    <script>
+        // Only load if Leaflet is still not available after CDN attempts
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                if (typeof L === 'undefined') {
+                    console.warn('All CDNs failed, loading embedded fallback...');
+                    
+                    // Simplified Leaflet implementation for basic map functionality
+                    window.L = (function() {
+                        var L = {};
+                        
+                        // Utility functions
+                        L.Util = {
+                            extend: function(dest) {
+                                var sources = Array.prototype.slice.call(arguments, 1);
+                                for (var i = 0; i < sources.length; i++) {
+                                    var src = sources[i];
+                                    for (var k in src) {
+                                        dest[k] = src[k];
+                                    }
+                                }
+                                return dest;
+                            },
+                            stamp: function(obj) {
+                                obj._leaflet_id = obj._leaflet_id || (++L.Util.lastId);
+                                return obj._leaflet_id;
+                            }
+                        };
+                        L.Util.lastId = 0;
+                        
+                        // Point class
+                        L.Point = function(x, y, round) {
+                            this.x = (round ? Math.round(x) : x);
+                            this.y = (round ? Math.round(y) : y);
+                        };
+                        
+                        L.point = function(x, y, round) {
+                            if (x instanceof L.Point) return x;
+                            if (x === undefined || x === null) return x;
+                            return new L.Point(x, y, round);
+                        };
+                        
+                        // LatLng class
+                        L.LatLng = function(lat, lng, alt) {
+                            if (isNaN(lat) || isNaN(lng)) {
+                                throw new Error('Invalid LatLng object: (' + lat + ', ' + lng + ')');
+                            }
+                            this.lat = +lat;
+                            this.lng = +lng;
+                            if (alt !== undefined) this.alt = +alt;
+                        };
+                        
+                        L.latLng = function(a, b, c) {
+                            if (a instanceof L.LatLng) return a;
+                            if (Array.isArray(a) && typeof a[0] !== 'object') {
+                                return new L.LatLng(a[0], a[1], a[2]);
+                            }
+                            if (typeof a === 'object' && 'lat' in a) {
+                                return new L.LatLng(a.lat, 'lng' in a ? a.lng : a.lon, a.alt);
+                            }
+                            if (b === undefined) return null;
+                            return new L.LatLng(a, b, c);
+                        };
+                        
+                        // Basic DOM utilities
+                        L.DomUtil = {
+                            get: function(id) {
+                                return typeof id === 'string' ? document.getElementById(id) : id;
+                            },
+                            create: function(tagName, className, container) {
+                                var el = document.createElement(tagName);
+                                el.className = className || '';
+                                if (container) container.appendChild(el);
+                                return el;
+                            }
+                        };
+                        
+                        // Basic event handling
+                        L.Evented = function() {};
+                        L.Evented.prototype = {
+                            on: function(types, fn, context) {
+                                this._events = this._events || {};
+                                if (typeof types === 'object') {
+                                    for (var type in types) {
+                                        this._on(type, types[type], fn);
+                                    }
+                                } else {
+                                    types = types.split(' ');
+                                    for (var i = 0; i < types.length; i++) {
+                                        this._on(types[i], fn, context);
+                                    }
+                                }
+                                return this;
+                            },
+                            _on: function(type, fn, context) {
+                                this._events = this._events || {};
+                                var events = this._events[type];
+                                if (!events) events = this._events[type] = [];
+                                events.push({fn: fn, ctx: context});
+                            },
+                            fire: function(type, data) {
+                                if (!this._events) return this;
+                                var event = L.Util.extend({}, data, {type: type, target: this});
+                                var events = this._events[type];
+                                if (events) {
+                                    for (var i = 0; i < events.length; i++) {
+                                        var listener = events[i];
+                                        listener.fn.call(listener.ctx || this, event);
+                                    }
+                                }
+                                return this;
+                            }
+                        };
+                        
+                        // Map class
+                        L.Map = function(id, options) {
+                            L.Evented.call(this);
+                            this.initialize(id, options);
+                        };
+                        
+                        L.Map.prototype = L.Util.extend({}, L.Evented.prototype, {
+                            initialize: function(id, options) {
+                                options = L.Util.extend({}, options);
+                                this._container = L.DomUtil.get(id);
+                                this._zoom = options.zoom || 10;
+                                this._center = L.latLng(options.center || [0, 0]);
+                                this.options = options;
+                                this._layers = {};
+                                this._initContainer();
+                                this._initLayout();
+                                console.log('Fallback map initialized');
+                            },
+                            _initContainer: function() {
+                                this._container.style.position = 'relative';
+                                this._container.style.overflow = 'hidden';
+                            },
+                            _initLayout: function() {
+                                this._mapPane = L.DomUtil.create('div', 'leaflet-map-pane', this._container);
+                                this._tilePane = L.DomUtil.create('div', 'leaflet-tile-pane', this._mapPane);
+                                this._addZoomControls();
+                            },
+                            _addZoomControls: function() {
+                                var corner = L.DomUtil.create('div', 'leaflet-control-container', this._container);
+                                corner.style.cssText = 'position:absolute;top:10px;left:10px;z-index:800;';
+                                
+                                var zoomControl = L.DomUtil.create('div', 'leaflet-control-zoom leaflet-bar', corner);
+                                zoomControl.style.cssText = 'box-shadow:0 1px 5px rgba(0,0,0,0.65);border-radius:4px;';
+                                
+                                var zoomIn = L.DomUtil.create('a', 'leaflet-control-zoom-in', zoomControl);
+                                var zoomOut = L.DomUtil.create('a', 'leaflet-control-zoom-out', zoomControl);
+                                
+                                zoomIn.innerHTML = '+';
+                                zoomOut.innerHTML = '−';
+                                zoomIn.href = zoomOut.href = '#';
+                                zoomIn.title = 'Zoom in';
+                                zoomOut.title = 'Zoom out';
+                                
+                                var buttonStyle = 'background-color:#fff;border-bottom:1px solid #ccc;width:26px;height:26px;line-height:26px;display:block;text-align:center;text-decoration:none;color:black;font:bold 18px monospace;';
+                                zoomIn.style.cssText = buttonStyle + 'border-top-left-radius:4px;border-top-right-radius:4px;';
+                                zoomOut.style.cssText = buttonStyle + 'border-bottom-left-radius:4px;border-bottom-right-radius:4px;border-bottom:none;';
+                                
+                                var self = this;
+                                zoomIn.onclick = function(e) { e.preventDefault(); self.zoomIn(); };
+                                zoomOut.onclick = function(e) { e.preventDefault(); self.zoomOut(); };
+                            },
+                            setView: function(center, zoom) {
+                                this._center = L.latLng(center);
+                                this._zoom = zoom;
+                                this.fire('moveend');
+                                this.fire('zoomend');
+                                return this;
+                            },
+                            getCenter: function() { return this._center; },
+                            getZoom: function() { return this._zoom; },
+                            zoomIn: function() { return this.setZoom(this._zoom + 1); },
+                            zoomOut: function() { return this.setZoom(this._zoom - 1); },
+                            setZoom: function(zoom) {
+                                this._zoom = Math.max(0, Math.min(18, zoom));
+                                this.fire('zoomend');
+                                return this;
+                            },
+                            addLayer: function(layer) {
+                                var id = L.Util.stamp(layer);
+                                this._layers[id] = layer;
+                                layer._map = this;
+                                if (layer.onAdd) layer.onAdd(this);
+                                return this;
+                            },
+                            getSize: function() {
+                                return new L.Point(this._container.clientWidth, this._container.clientHeight);
+                            }
+                        });
+                        
+                        // TileLayer class
+                        L.TileLayer = function(urlTemplate, options) {
+                            L.Evented.call(this);
+                            this.initialize(urlTemplate, options);
+                        };
+                        
+                        L.TileLayer.prototype = L.Util.extend({}, L.Evented.prototype, {
+                            initialize: function(url, options) {
+                                this._url = url;
+                                this.options = L.Util.extend({
+                                    minZoom: 0, maxZoom: 18, tileSize: 256, opacity: 1
+                                }, options);
+                            },
+                            onAdd: function(map) {
+                                this._map = map;
+                                this._container = L.DomUtil.create('div', 'leaflet-layer');
+                                this._container.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;';
+                                map._tilePane.appendChild(this._container);
+                                this._updateOpacity();
+                                this._showPlaceholder();
+                            },
+                            setOpacity: function(opacity) {
+                                this.options.opacity = opacity;
+                                if (this._map) this._updateOpacity();
+                                return this;
+                            },
+                            _updateOpacity: function() {
+                                if (this._container) this._container.style.opacity = this.options.opacity;
+                            },
+                            _showPlaceholder: function() {
+                                var placeholder = L.DomUtil.create('div', '', this._container);
+                                placeholder.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;background:radial-gradient(circle at 52.37% 48.89%, rgba(255,255,0,0.3) 0%, rgba(255,100,0,0.2) 30%, rgba(255,0,0,0.1) 60%, transparent 100%);pointer-events:none;';
+                                
+                                var attribution = L.DomUtil.create('div', '', this._container);
+                                attribution.innerHTML = '<a href="https://djlorenz.github.io/astronomy/lp/" target="_blank" style="position:absolute;bottom:5px;right:5px;color:#333;font-size:11px;background:rgba(255,255,255,0.8);padding:2px 4px;border-radius:2px;text-decoration:none;">Light Pollution Atlas 2024 (Fallback)</a>';
+                            }
+                        });
+                        
+                        // Factory functions
+                        L.map = function(id, options) { return new L.Map(id, options); };
+                        L.tileLayer = function(url, options) { return new L.TileLayer(url, options); };
+                        
+                        return L;
+                    })();
+                    
+                    console.log('Fallback Leaflet library loaded');
+                    
+                    // Trigger map initialization if it was waiting
+                    if (window.initMapWhenReady) {
+                        window.initMapWhenReady();
+                    }
+                }
+            }, 1000);
+        });
+    </script>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+            background: transparent;
+        }
+        
+        /* Navigation bar is always interactive */
+        #navbar * {
+            pointer-events: auto;
+        }
+        
+        /* Content frame styling */
+        #content-frame {
+            border: none;
+            width: 100%;
+            height: 100%;
+            pointer-events: auto;
+        }
+        
+        /* Overlay styling */
+        #overlay {
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        
+        /* Leaflet controls are always interactive */
+        .leaflet-control-container {
+            pointer-events: auto;
+        }
+        
+        /* Sync capture layer */
+        #sync-capture {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 15;
+            pointer-events: none;
+            background: transparent;
+        }
+        
+        #sync-capture.active {
+            pointer-events: auto;
+            cursor: grab;
+            /* Lower z-index in both mode to allow scroll events on underlying elements */
+            z-index: 5;
+        }
+        
+        #sync-capture.active:active {
+            cursor: grabbing;
+        }
+        
+        /* Animations */
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        /* Button styling */
+        .mode-button {
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .mode-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        /* Fullscreen mode */
+        .fullscreen-active {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 9999 !important;
+            background: white;
+        }
+        
+        /* Help overlay */
+        .shortcut-help {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.95);
+            color: white;
+            padding: 24px;
+            border-radius: 12px;
+            z-index: 1000;
+            max-width: 450px;
+            backdrop-filter: blur(10px);
+        }
+        
+        /* Sync indicators */
+        .sync-active {
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
+        }
+        
+        /* Disable text selection during sync */
+        .no-select {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        
+        /* Both mode styling */
+        .both-mode-active #overlay {
+            border: 2px solid #8b5cf6;
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+        }
+        
+        .both-mode-active #content-frame {
+            border: 2px solid #8b5cf6;
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+        }
+        
+        /* Error message styling */
+        .error-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #dc2626;
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            z-index: 1000;
+            max-width: 500px;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            #navbar {
+                padding: 12px;
+            }
+            
+            .mode-button {
+                padding: 8px 12px;
+                font-size: 14px;
+            }
+            
+            #main-content {
+                padding-top: 140px;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <nav id="navbar" class="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-b border-gray-200 shadow-lg flex items-center p-4 z-50">
+        <div class="w-full max-w-screen-xl mx-auto flex flex-col lg:flex-row items-center justify-between gap-4">
+            <div class="flex-grow w-full lg:w-auto flex items-center min-w-0">
+                <input id="url-input" type="text" placeholder="🌐 Voer URL in (bijv. openstreetmap.org)" 
+                       class="w-full p-3 rounded-l-lg bg-gray-50 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 transition-all min-w-0"
+                       value="https://www.openstreetmap.org/#map=10/52.35/4.88">
+                <button id="go-button" class="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-r-lg font-bold transition-colors whitespace-nowrap">
+                    <span class="hidden sm:inline">Navigeer</span>
+                    <span class="sm:hidden">→</span>
+                </button>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-2">
+                <div class="flex gap-2">
+                    <button id="sync-button" class="mode-button bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors" title="Synchroniseer overlay met website (S)">
+                        📍 Sync
+                    </button>
+                    <button id="fullscreen-button" class="mode-button bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors" title="Volledig scherm (F)">
+                        ⛶
+                    </button>
+                </div>
+                
+                <button id="control-mode-toggle" class="mode-button bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors" title="Wissel tussen website, overlay en beide bediening (Tab)">
+                    🌐 Website
+                </button>
+                
+                <div class="flex items-center space-x-2 bg-gray-100 px-3 py-2 rounded-lg">
+                    <input type="checkbox" id="overlay-toggle" class="h-4 w-4 rounded text-blue-600 focus:ring-blue-500 border-gray-300" checked>
+                    <label for="overlay-toggle" class="font-medium text-gray-700 select-none text-sm whitespace-nowrap" title="Toon/verberg overlay (V)">Overlay</label>
+                </div>
+                
+                <div class="flex items-center space-x-2 bg-gray-100 px-3 py-2 rounded-lg">
+                    <label for="opacity-slider" class="text-gray-700 text-sm whitespace-nowrap">💡</label>
+                    <input id="opacity-slider" type="range" min="0" max="1" step="0.05" value="0.6" class="w-20 cursor-pointer" title="Transparantie aanpassen (↑/↓)">
+                    <span id="opacity-value" class="text-gray-700 text-sm w-10">60%</span>
+                </div>
+                
+                <button id="help-button" class="mode-button bg-gray-500 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm transition-colors" title="Sneltoetsen (H)">
+                    ❓
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <main id="main-content" class="relative w-full h-screen pt-24">
+        <iframe id="content-frame" src="https://www.openstreetmap.org/#map=10/52.35/4.88" title="Website Content" 
+                sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads allow-modals allow-orientation-lock allow-pointer-lock allow-presentation allow-top-navigation-by-user-activation"
+                allow="geolocation; microphone; camera; midi; vr; accelerometer; gyroscope; payment; ambient-light-sensor; encrypted-media; usb">
+        </iframe>
+        
+        <div id="overlay" class="absolute top-0 left-0 w-full h-full z-10">
+            <div id="map"></div>
+        </div>
+        
+        <div id="sync-capture"></div>
+    </main>
+    
+    <div id="mode-indicator" class="fixed bottom-5 right-5 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg z-40 text-sm font-bold transition-all">
+        🌐 Website Actief
+    </div>
+    
+    <div id="coordinate-display" class="hidden fixed bottom-5 left-5 bg-black/80 text-white px-4 py-2 rounded-lg shadow-lg z-40 text-sm font-mono">
+        <div id="coords-text">Lat: 0.0000, Lng: 0.0000, Zoom: 0</div>
+    </div>
+    
+    <div id="sync-status" class="hidden fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-purple-600/90 text-white px-6 py-3 rounded-lg shadow-lg z-50 text-sm font-bold">
+        🔄 Beide Modus Actief - Sleep overal om beide kaarten te bewegen
+    </div>
+    
+    <div id="sync-message" class="hidden fixed bottom-20 left-1/2 -translate-x-1/2 bg-red-600 text-white py-3 px-6 rounded-lg shadow-lg z-40">
+        ❌ Sync mislukt: geen coördinaten gevonden
+    </div>
+
+    <div id="sync-success" class="hidden fixed bottom-20 left-1/2 -translate-x-1/2 bg-green-600 text-white py-3 px-6 rounded-lg shadow-lg z-40">
+        ✅ Kaart gesynchroniseerd!
+    </div>
+
+    <div id="auto-sync-indicator" class="hidden fixed top-28 right-5 bg-blue-600/90 text-white px-3 py-2 rounded-lg shadow-lg z-40 text-sm">
+        🔄 Auto-sync actief
+    </div>
+
+    <div id="help-overlay" class="hidden shortcut-help">
+        <h3 class="font-bold mb-4 text-xl">⌨️ Sneltoetsen</h3>
+        <div class="space-y-3 text-sm">
+            <div><kbd class="bg-gray-700 px-2 py-1 rounded">Tab</kbd> - Wissel tussen Website/Overlay/Beide modus</div>
+            <div><kbd class="bg-gray-700 px-2 py-1 rounded">S</kbd> - Synchroniseer kaarten</div>
+            <div><kbd class="bg-gray-700 px-2 py-1 rounded">V</kbd> - Toon/verberg overlay</div>
+            <div><kbd class="bg-gray-700 px-2 py-1 rounded">F</kbd> - Volledig scherm</div>
+            <div><kbd class="bg-gray-700 px-2 py-1 rounded">↑/↓</kbd> - Transparantie aanpassen</div>
+            <div><kbd class="bg-gray-700 px-2 py-1 rounded">C</kbd> - Toon coördinaten</div>
+            <div><kbd class="bg-gray-700 px-2 py-1 rounded">H</kbd> - Deze help</div>
+            <div><kbd class="bg-gray-700 px-2 py-1 rounded">Esc</kbd> - Sluit overlay/help</div>
+            <div class="mt-3 pt-3 border-t border-gray-600">
+                <strong>Beide Modus:</strong> Sleep overal om beide kaarten synchroon te bewegen<br>
+                <strong>Scroll Sync:</strong> Muiswiel werkt op zowel website als overlay
+            </div>
+        </div>
+        <button id="close-help" class="mt-4 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm transition-colors">Sluiten</button>
+    </div>
+
+    <script>
+        // DOM Elements
+        const elements = {
+            urlInput: document.getElementById('url-input'),
+            goButton: document.getElementById('go-button'),
+            contentFrame: document.getElementById('content-frame'),
+            overlayToggle: document.getElementById('overlay-toggle'),
+            opacitySlider: document.getElementById('opacity-slider'),
+            opacityValue: document.getElementById('opacity-value'),
+            overlay: document.getElementById('overlay'),
+            syncButton: document.getElementById('sync-button'),
+            controlModeToggle: document.getElementById('control-mode-toggle'),
+            modeIndicator: document.getElementById('mode-indicator'),
+            syncMessage: document.getElementById('sync-message'),
+            syncSuccess: document.getElementById('sync-success'),
+            autoSyncIndicator: document.getElementById('auto-sync-indicator'),
+            fullscreenButton: document.getElementById('fullscreen-button'),
+            helpButton: document.getElementById('help-button'),
+            helpOverlay: document.getElementById('help-overlay'),
+            closeHelp: document.getElementById('close-help'),
+            coordinateDisplay: document.getElementById('coordinate-display'),
+            coordsText: document.getElementById('coords-text'),
+            syncCapture: document.getElementById('sync-capture'),
+            syncStatus: document.getElementById('sync-status'),
+            mainContent: document.getElementById('main-content')
+        };
+
+        // Global state
+        let map;
+        let lightPollutionLayer;
+        let controlMode = 'website'; // 'website', 'overlay', 'both'
+        let autoSyncEnabled = false;
+        let autoSyncInterval = null;
+        let lastKnownPosition = null;
+        let isFullscreen = false;
+        let showCoordinates = false;
+        let syncMode = false;
+        let isDragging = false;
+        let lastMousePos = null;
+        let initialMapCenter = null;
+        let syncLocked = false;
+
+        // Initialize map with retry mechanism
+        function initializeMap() {
+            let retryCount = 0;
+            const maxRetries = 15;
+            
+            function tryInitialize() {
+                try {
+                    if (typeof L === 'undefined') {
+                        retryCount++;
+                        if (retryCount < maxRetries) {
+                            console.log(`Waiting for Leaflet... Attempt ${retryCount}/${maxRetries}`);
+                            setTimeout(tryInitialize, 500);
+                            return;
+                        } else {
+                            showError('Leaflet library kon niet geladen worden. Controleer je internetverbinding en herlaad de pagina.');
+                            return;
+                        }
+                    }
+
+                    console.log('Initializing map...');
+
+                    map = L.map('map', {
+                        center: [52.37, 4.89],
+                        zoom: 10,
+                        zoomControl: true,
+                        preferCanvas: true
+                    });
+
+                    // Light pollution 2024 layer with fallback
+                    const tileUrl = 'https://djlorenz.github.io/astronomy/image_tiles/tiles2024/tile_{z}_{x}_{y}.png';
+                    lightPollutionLayer = L.tileLayer(tileUrl, {
+                        minZoom: 2,
+                        maxNativeZoom: 8,
+                        maxZoom: 19,
+                        tileSize: 1024,
+                        zoomOffset: -2,
+                        opacity: 0.6,
+                        attribution: '<a href="https://djlorenz.github.io/astronomy/lp/" target="_blank">Light Pollution Atlas 2024</a>',
+                        errorTileUrl: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjU2IiBoZWlnaHQ9IjI1NiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjU2IiBoZWlnaHQ9IjI1NiIgZmlsbD0idHJhbnNwYXJlbnQiLz48L3N2Zz4='
+                    });
+
+                    lightPollutionLayer.addTo(map);
+
+                    // Map event listeners
+                    map.on('moveend zoomend', function() {
+                        try {
+                            const center = map.getCenter();
+                            const zoom = map.getZoom();
+                            lastKnownPosition = {lat: center.lat, lng: center.lng, zoom: zoom};
+                            
+                            if (showCoordinates) {
+                                updateCoordinateDisplay();
+                            }
+                            
+                            if (controlMode === 'both' && !syncLocked) {
+                                syncLocked = true;
+                                updateWebsiteFromOverlay(center.lat, center.lng, zoom);
+                                setTimeout(() => { syncLocked = false; }, 100);
+                            }
+                        } catch (e) {
+                            console.error('Error in map event handler:', e);
+                        }
+                    });
+
+                    console.log('Light Pollution Map 2024 initialized');
+                    updateCoordinateDisplay();
+                    
+                } catch (error) {
+                    console.error('Error initializing map:', error);
+                    showError('Fout bij het laden van de kaart. Herlaad de pagina.');
+                }
+            }
+            
+            tryInitialize();
+        }
+
+        // Set up fallback initialization
+        window.initMapWhenReady = initializeMap;
+
+        // Navigation functions
+        function navigate() {
+            let url = elements.urlInput.value.trim();
+            if (!url) return;
+            
+            if (!url.startsWith('http')) {
+                url = 'https://' + url;
+            }
+            
+            elements.contentFrame.src = url;
+            console.log('Navigating to:', url);
+            startAutoSync();
+        }
+
+        // Overlay visibility
+        function updateOverlayVisibility() {
+            if (elements.overlayToggle.checked) {
+                elements.overlay.style.display = 'block';
+                elements.overlay.classList.add('fade-in');
+            } else {
+                elements.overlay.style.display = 'none';
+                elements.overlay.classList.remove('fade-in');
+            }
+        }
+
+        // Opacity control
+        function updateOpacity() {
+            const opacity = parseFloat(elements.opacitySlider.value);
+            if (lightPollutionLayer) {
+                lightPollutionLayer.setOpacity(opacity);
+            }
+            elements.opacityValue.textContent = Math.round(opacity * 100) + '%';
+        }
+
+        // Control mode management
+        function toggleControlMode() {
+            if (controlMode === 'website') {
+                controlMode = 'overlay';
+            } else if (controlMode === 'overlay') {
+                controlMode = 'both';
+            } else {
+                controlMode = 'website';
+            }
+            updateControlMode();
+        }
+
+        function updateControlMode() {
+            disableSyncMode();
+            document.body.classList.remove('both-mode-active');
+            
+            if (controlMode === 'website') {
+                elements.overlay.style.pointerEvents = 'none';
+                elements.contentFrame.style.pointerEvents = 'auto';
+                elements.controlModeToggle.textContent = '🌐 Website';
+                elements.controlModeToggle.className = 'mode-button bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors';
+                elements.modeIndicator.textContent = '🌐 Website Actief';
+                elements.modeIndicator.className = 'fixed bottom-5 right-5 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg z-40 text-sm font-bold transition-all';
+                startAutoSync();
+            } else if (controlMode === 'overlay') {
+                elements.overlay.style.pointerEvents = 'auto';
+                elements.contentFrame.style.pointerEvents = 'none';
+                elements.controlModeToggle.textContent = '🗺️ Overlay';
+                elements.controlModeToggle.className = 'mode-button bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors';
+                elements.modeIndicator.textContent = '🗺️ Overlay Actief';
+                elements.modeIndicator.className = 'fixed bottom-5 right-5 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-40 text-sm font-bold transition-all';
+                stopAutoSync();
+            } else if (controlMode === 'both') {
+                enableSyncMode();
+                document.body.classList.add('both-mode-active');
+                elements.controlModeToggle.textContent = '🔄 Beide';
+                elements.controlModeToggle.className = 'mode-button bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors';
+                elements.modeIndicator.textContent = '🔄 Beide Actief';
+                elements.modeIndicator.className = 'fixed bottom-5 right-5 bg-purple-600 text-white px-4 py-2 rounded-lg shadow-lg z-40 text-sm font-bold transition-all';
+                startAutoSync();
+            }
+        }
+
+        // Sync mode functions
+        function enableSyncMode() {
+            syncMode = true;
+            elements.overlay.style.pointerEvents = 'auto';
+            elements.contentFrame.style.pointerEvents = 'auto';
+            elements.syncCapture.classList.add('active');
+            elements.syncCapture.style.zIndex = '20';
+            elements.syncStatus.classList.remove('hidden');
+            elements.overlay.classList.add('sync-active');
+            document.body.classList.add('no-select');
+            
+            // Enable wheel events on both iframe and overlay for scroll sync
+            elements.contentFrame.style.pointerEvents = 'auto';
+            elements.overlay.style.pointerEvents = 'auto';
+            
+            setupSyncEvents();
+        }
+
+        function disableSyncMode() {
+            syncMode = false;
+            elements.syncCapture.classList.remove('active');
+            elements.syncCapture.style.zIndex = '15';
+            elements.syncStatus.classList.add('hidden');
+            elements.overlay.classList.remove('sync-active');
+            document.body.classList.remove('no-select');
+            removeSyncEvents();
+        }
+
+        function setupSyncEvents() {
+            elements.syncCapture.addEventListener('mousedown', handleSyncMouseDown);
+            elements.syncCapture.addEventListener('wheel', handleSyncWheel, { passive: false });
+            elements.syncCapture.addEventListener('touchstart', handleSyncTouchStart, { passive: false });
+            
+            // Add scroll sync for iframe in both mode
+            elements.contentFrame.addEventListener('wheel', handleIframeScroll, { passive: false });
+            elements.overlay.addEventListener('wheel', handleOverlayScroll, { passive: false });
+        }
+
+        function removeSyncEvents() {
+            elements.syncCapture.removeEventListener('mousedown', handleSyncMouseDown);
+            elements.syncCapture.removeEventListener('wheel', handleSyncWheel);
+            elements.syncCapture.removeEventListener('touchstart', handleSyncTouchStart);
+            elements.contentFrame.removeEventListener('wheel', handleIframeScroll);
+            elements.overlay.removeEventListener('wheel', handleOverlayScroll);
+            document.removeEventListener('mousemove', handleSyncMouseMove);
+            document.removeEventListener('mouseup', handleSyncMouseUp);
+            document.removeEventListener('touchmove', handleSyncTouchMove);
+            document.removeEventListener('touchend', handleSyncTouchEnd);
+        }
+
+        // Mouse event handlers
+        function handleSyncMouseDown(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            isDragging = true;
+            lastMousePos = { x: e.clientX, y: e.clientY };
+            if (map) initialMapCenter = map.getCenter();
+            
+            document.addEventListener('mousemove', handleSyncMouseMove);
+            document.addEventListener('mouseup', handleSyncMouseUp);
+            
+            elements.syncCapture.style.cursor = 'grabbing';
+        }
+
+        function handleSyncMouseMove(e) {
+            if (!isDragging || !lastMousePos || !initialMapCenter || !map) return;
+            
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const deltaX = e.clientX - lastMousePos.x;
+            const deltaY = e.clientY - lastMousePos.y;
+            
+            const mapSize = map.getSize();
+            const mapBounds = map.getBounds();
+            const latDelta = (mapBounds.getNorth() - mapBounds.getSouth()) * (deltaY / mapSize.y);
+            const lngDelta = (mapBounds.getEast() - mapBounds.getWest()) * (deltaX / mapSize.x);
+            
+            const newLat = initialMapCenter.lat - latDelta;
+            const newLng = initialMapCenter.lng - lngDelta;
+            
+            syncLocked = true;
+            map.setView([newLat, newLng], map.getZoom(), { animate: false });
+            updateWebsiteFromOverlay(newLat, newLng, map.getZoom());
+            setTimeout(() => { syncLocked = false; }, 50);
+        }
+
+        function handleSyncMouseUp(e) {
+            isDragging = false;
+            lastMousePos = null;
+            initialMapCenter = null;
+            
+            document.removeEventListener('mousemove', handleSyncMouseMove);
+            document.removeEventListener('mouseup', handleSyncMouseUp);
+            
+            elements.syncCapture.style.cursor = 'grab';
+        }
+
+        function handleSyncWheel(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (!map) return;
+            
+            const delta = e.deltaY > 0 ? -1 : 1;
+            const currentZoom = map.getZoom();
+            const newZoom = Math.max(2, Math.min(19, currentZoom + delta));
+            
+            const center = map.getCenter();
+            
+            syncLocked = true;
+            map.setZoom(newZoom, { animate: false });
+            updateWebsiteFromOverlay(center.lat, center.lng, newZoom);
+            
+            // Also try to sync iframe zoom if possible
+            try {
+                if (elements.contentFrame && elements.contentFrame.contentWindow && elements.contentFrame.contentWindow.postMessage) {
+                    elements.contentFrame.contentWindow.postMessage({
+                        type: 'zoom',
+                        delta: delta,
+                        center: { lat: center.lat, lng: center.lng },
+                        zoom: newZoom
+                    }, '*');
+                }
+            } catch (e) {
+                // Cross-origin restrictions
+            }
+            
+            setTimeout(() => { syncLocked = false; }, 50);
+        }
+
+        // Handle scroll events on iframe (when user scrolls over website)
+        function handleIframeScroll(e) {
+            if (controlMode !== 'both' || !map) return;
+            
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const delta = e.deltaY > 0 ? -1 : 1;
+            const currentZoom = map.getZoom();
+            const newZoom = Math.max(2, Math.min(19, currentZoom + delta));
+            
+            if (newZoom !== currentZoom) {
+                syncLocked = true;
+                map.setZoom(newZoom, { animate: false });
+                
+                const center = map.getCenter();
+                updateWebsiteFromOverlay(center.lat, center.lng, newZoom);
+                
+                setTimeout(() => { syncLocked = false; }, 50);
+            }
+        }
+
+        // Handle scroll events on overlay (when user scrolls over map)
+        function handleOverlayScroll(e) {
+            if (controlMode !== 'both' || !map) return;
+            
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const delta = e.deltaY > 0 ? -1 : 1;
+            const currentZoom = map.getZoom();
+            const newZoom = Math.max(2, Math.min(19, currentZoom + delta));
+            
+            if (newZoom !== currentZoom) {
+                syncLocked = true;
+                map.setZoom(newZoom, { animate: false });
+                
+                const center = map.getCenter();
+                updateWebsiteFromOverlay(center.lat, center.lng, newZoom);
+                
+                // Try to sync website zoom
+                try {
+                    if (elements.contentFrame && elements.contentFrame.contentWindow && elements.contentFrame.contentWindow.postMessage) {
+                        elements.contentFrame.contentWindow.postMessage({
+                            type: 'zoom',
+                            delta: delta,
+                            center: { lat: center.lat, lng: center.lng },
+                            zoom: newZoom
+                        }, '*');
+                    }
+                } catch (e) {
+                    // Cross-origin restrictions
+                }
+                
+                setTimeout(() => { syncLocked = false; }, 50);
+            }
+        }
+
+        // Touch event handlers
+        function handleSyncTouchStart(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (e.touches.length === 1 && map) {
+                isDragging = true;
+                lastMousePos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                initialMapCenter = map.getCenter();
+                
+                document.addEventListener('touchmove', handleSyncTouchMove, { passive: false });
+                document.addEventListener('touchend', handleSyncTouchEnd);
+            }
+        }
+
+        function handleSyncTouchMove(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (e.touches.length === 1 && isDragging && lastMousePos && initialMapCenter && map) {
+                const deltaX = e.touches[0].clientX - lastMousePos.x;
+                const deltaY = e.touches[0].clientY - lastMousePos.y;
+                
+                const mapSize = map.getSize();
+                const mapBounds = map.getBounds();
+                const latDelta = (mapBounds.getNorth() - mapBounds.getSouth()) * (deltaY / mapSize.y);
+                const lngDelta = (mapBounds.getEast() - mapBounds.getWest()) * (deltaX / mapSize.x);
+                
+                const newLat = initialMapCenter.lat - latDelta;
+                const newLng = initialMapCenter.lng - lngDelta;
+                
+                syncLocked = true;
+                map.setView([newLat, newLng], map.getZoom(), { animate: false });
+                updateWebsiteFromOverlay(newLat, newLng, map.getZoom());
+                setTimeout(() => { syncLocked = false; }, 50);
+            }
+        }
+
+        function handleSyncTouchEnd(e) {
+            isDragging = false;
+            lastMousePos = null;
+            initialMapCenter = null;
+            
+            document.removeEventListener('touchmove', handleSyncTouchMove);
+            document.removeEventListener('touchend', handleSyncTouchEnd);
+        }
+
+        // URL and coordinate parsing
+        function getCoordsFromUrl() {
+            try {
+                const url = elements.urlInput.value;
+                
+                // OpenStreetMap format
+                const osmMatch = url.match(/#map=([\d.]+)\/(-?[\d.]+)\/(-?[\d.]+)/);
+                if (osmMatch) {
+                    return { 
+                        zoom: parseInt(osmMatch[1]), 
+                        lat: parseFloat(osmMatch[2]), 
+                        lng: parseFloat(osmMatch[3]) 
+                    };
+                }
+
+                // Google Maps format
+                const googleMatch = url.match(/@(-?[\d.]+),(-?[\d.]+),([\d.]+)z/);
+                if (googleMatch) {
+                    return { 
+                        lat: parseFloat(googleMatch[1]), 
+                        lng: parseFloat(googleMatch[2]), 
+                        zoom: parseInt(googleMatch[3]) 
+                    };
+                }
+                
+                return null;
+            } catch (error) {
+                console.error("Could not parse URL:", error);
+                return null;
+            }
+        }
+
+        function updateWebsiteFromOverlay(lat, lng, zoom) {
+            try {
+                const currentUrl = elements.urlInput.value;
+                if (!currentUrl) return;
+                
+                let newUrl = '';
+                
+                if (currentUrl.includes('openstreetmap.org')) {
+                    newUrl = currentUrl.replace(/#map=[\d.]+\/[-?\d.]+\/[-?\d.]+/, `#map=${zoom}/${lat.toFixed(5)}/${lng.toFixed(5)}`);
+                    if (newUrl === currentUrl) {
+                        const baseUrl = currentUrl.split('#')[0];
+                        newUrl = baseUrl + `#map=${zoom}/${lat.toFixed(5)}/${lng.toFixed(5)}`;
+                    }
+                } else if (currentUrl.includes('google.com/maps')) {
+                    newUrl = currentUrl.replace(/@[-?\d.]+,[-?\d.]+,[\d.]+z/, `@${lat.toFixed(5)},${lng.toFixed(5)},${zoom}z`);
+                }
+                
+                if (newUrl && newUrl !== currentUrl) {
+                    elements.urlInput.value = newUrl;
+                    try {
+                        if (elements.contentFrame && elements.contentFrame.contentWindow) {
+                            elements.contentFrame.src = newUrl;
+                        }
+                    } catch (crossOriginError) {
+                        // Cross-origin restriction - expected behavior
+                    }
+                }
+            } catch (e) {
+                console.warn('Cannot update website URL:', e.message);
+            }
+        }
+
+        // Sync functions
+        function syncMaps() {
+            const coords = getCoordsFromUrl();
+            
+            if (coords && map) {
+                map.setView([coords.lat, coords.lng], coords.zoom);
+                lastKnownPosition = coords;
+                console.log(`Map synced to: Lat=${coords.lat}, Lng=${coords.lng}, Zoom=${coords.zoom}`);
+                
+                showMessage(elements.syncSuccess, 2000);
+                hideMessage(elements.syncMessage);
+                
+                if (showCoordinates) {
+                    updateCoordinateDisplay();
+                }
+            } else {
+                console.log('No coordinates found in URL');
+                showMessage(elements.syncMessage, 3000);
+            }
+        }
+
+        // Auto-sync functionality
+        function startAutoSync() {
+            if (autoSyncInterval) return;
+            
+            autoSyncEnabled = true;
+            elements.autoSyncIndicator.classList.remove('hidden');
+            
+            autoSyncInterval = setInterval(() => {
+                if ((controlMode === 'website' || controlMode === 'both') && autoSyncEnabled && !syncLocked) {
+                    try {
+                        if (elements.contentFrame && elements.contentFrame.contentWindow) {
+                            const iframeUrl = elements.contentFrame.contentWindow.location.href;
+                            if (iframeUrl && iframeUrl !== elements.urlInput.value && iframeUrl !== 'about:blank') {
+                                elements.urlInput.value = iframeUrl;
+                                const coords = getCoordsFromUrl();
+                                if (coords && map) {
+                                    if (!lastKnownPosition || 
+                                        Math.abs(coords.lat - lastKnownPosition.lat) > 0.001 ||
+                                        Math.abs(coords.lng - lastKnownPosition.lng) > 0.001 ||
+                                        Math.abs(coords.zoom - lastKnownPosition.zoom) > 0.5) {
+                                        
+                                        syncLocked = true;
+                                        map.setView([coords.lat, coords.lng], coords.zoom);
+                                        lastKnownPosition = coords;
+                                        
+                                        if (showCoordinates) {
+                                            updateCoordinateDisplay();
+                                        }
+                                        
+                                        setTimeout(() => { syncLocked = false; }, 100);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Cross-origin restrictions - expected behavior
+                    }
+                }
+            }, 1000);
+        }
+        
+        function stopAutoSync() {
+            autoSyncEnabled = false;
+            elements.autoSyncIndicator.classList.add('hidden');
+            if (autoSyncInterval) {
+                clearInterval(autoSyncInterval);
+                autoSyncInterval = null;
+            }
+        }
+
+        // Fullscreen functionality
+        function toggleFullscreen() {
+            if (!isFullscreen) {
+                if (elements.mainContent.requestFullscreen) {
+                    elements.mainContent.requestFullscreen();
+                } else if (elements.mainContent.webkitRequestFullscreen) {
+                    elements.mainContent.webkitRequestFullscreen();
+                } else if (elements.mainContent.msRequestFullscreen) {
+                    elements.mainContent.msRequestFullscreen();
+                } else {
+                    document.body.classList.add('fullscreen-active');
+                }
+                isFullscreen = true;
+                elements.fullscreenButton.textContent = '⛶ Exit';
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                } else if (document.msExitFullscreen) {
+                    document.msExitFullscreen();
+                } else {
+                    document.body.classList.remove('fullscreen-active');
+                }
+                isFullscreen = false;
+                elements.fullscreenButton.textContent = '⛶';
+            }
+        }
+
+        // Coordinate display
+        function toggleCoordinates() {
+            showCoordinates = !showCoordinates;
+            elements.coordinateDisplay.style.display = showCoordinates ? 'block' : 'none';
+            if (showCoordinates) {
+                updateCoordinateDisplay();
+            }
+        }
+
+        function updateCoordinateDisplay() {
+            if (map && showCoordinates) {
+                const center = map.getCenter();
+                const zoom = map.getZoom();
+                elements.coordsText.textContent = `Lat: ${center.lat.toFixed(4)}, Lng: ${center.lng.toFixed(4)}, Zoom: ${zoom}`;
+            }
+        }
+
+        // Help functions
+        function showHelp() {
+            elements.helpOverlay.classList.remove('hidden');
+        }
+
+        function hideHelp() {
+            elements.helpOverlay.classList.add('hidden');
+        }
+
+        // Utility functions
+        function showMessage(element, duration = 0) {
+            element.classList.remove('hidden');
+            if (duration > 0) {
+                setTimeout(() => element.classList.add('hidden'), duration);
+            }
+        }
+
+        function hideMessage(element) {
+            element.classList.add('hidden');
+        }
+
+        function showError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+            errorDiv.innerHTML = `
+                <h3 class="font-bold mb-3">⚠️ Fout</h3>
+                <p class="mb-4">${message}</p>
+                <button onclick="location.reload()" class="bg-white text-red-600 px-4 py-2 rounded font-bold hover:bg-gray-100 transition-colors">
+                    Pagina Herladen
+                </button>
+            `;
+            document.body.appendChild(errorDiv);
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+            
+            switch(e.key.toLowerCase()) {
+                case 'tab':
+                    e.preventDefault();
+                    toggleControlMode();
+                    break;
+                case 's':
+                    e.preventDefault();
+                    syncMaps();
+                    break;
+                case 'v':
+                    e.preventDefault();
+                    elements.overlayToggle.checked = !elements.overlayToggle.checked;
+                    updateOverlayVisibility();
+                    break;
+                case 'f':
+                    e.preventDefault();
+                    toggleFullscreen();
+                    break;
+                case 'c':
+                    e.preventDefault();
+                    toggleCoordinates();
+                    break;
+                case 'h':
+                    e.preventDefault();
+                    showHelp();
+                    break;
+                case 'escape':
+                    e.preventDefault();
+                    if (!elements.helpOverlay.classList.contains('hidden')) {
+                        hideHelp();
+                    } else if (isFullscreen) {
+                        toggleFullscreen();
+                    }
+                    break;
+                case 'arrowup':
+                    e.preventDefault();
+                    elements.opacitySlider.value = Math.min(1, parseFloat(elements.opacitySlider.value) + 0.05);
+                    updateOpacity();
+                    break;
+                case 'arrowdown':
+                    e.preventDefault();
+                    elements.opacitySlider.value = Math.max(0, parseFloat(elements.opacitySlider.value) - 0.05);
+                    updateOpacity();
+                    break;
+            }
+        });
+
+        // Event listeners
+        elements.goButton.addEventListener('click', navigate);
+        elements.urlInput.addEventListener('keypress', (e) => { 
+            if (e.key === 'Enter') navigate(); 
+        });
+        elements.overlayToggle.addEventListener('change', updateOverlayVisibility);
+        elements.opacitySlider.addEventListener('input', updateOpacity);
+        elements.syncButton.addEventListener('click', syncMaps);
+        elements.controlModeToggle.addEventListener('click', toggleControlMode);
+        elements.fullscreenButton.addEventListener('click', toggleFullscreen);
+        elements.helpButton.addEventListener('click', showHelp);
+        elements.closeHelp.addEventListener('click', hideHelp);
+        
+        // Fullscreen event listeners
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement) {
+                isFullscreen = false;
+                elements.fullscreenButton.textContent = '⛶';
+            }
+        });
+
+        document.addEventListener('webkitfullscreenchange', () => {
+            if (!document.webkitFullscreenElement) {
+                isFullscreen = false;
+                elements.fullscreenButton.textContent = '⛶';
+            }
+        });
+
+        document.addEventListener('msfullscreenchange', () => {
+            if (!document.msFullscreenElement) {
+                isFullscreen = false;
+                elements.fullscreenButton.textContent = '⛶';
+            }
+        });
+
+        // Iframe event listeners
+        elements.contentFrame.addEventListener('load', () => {
+            console.log('Website loaded');
+            setTimeout(() => {
+                try {
+                    if (elements.contentFrame && elements.contentFrame.contentWindow) {
+                        const iframeUrl = elements.contentFrame.contentWindow.location.href;
+                        if (iframeUrl && iframeUrl !== 'about:blank' && iframeUrl !== elements.urlInput.value) {
+                            elements.urlInput.value = iframeUrl;
+                        }
+                    }
+                } catch (e) {
+                    // Cross-origin iframe - expected behavior
+                }
+            }, 500);
+        });
+
+        // Global error handlers
+        window.addEventListener('error', (e) => {
+            console.error('Global error:', e.message, 'at', e.filename, ':', e.lineno);
+        });
+
+        window.addEventListener('unhandledrejection', (e) => {
+            console.error('Unhandled promise rejection:', e.reason);
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            stopAutoSync();
+            disableSyncMode();
+        });
+
+        // Initialize application
+        window.addEventListener('load', () => {
+            console.log('Initializing Web Overlay Tool...');
+            initializeMap();
+            updateOverlayVisibility();
+            updateOpacity();
+            updateControlMode();
+            console.log('Web Overlay Tool ready!');
+        });
+
+    </script>
+</body>
+</html>
